@@ -1,55 +1,29 @@
 import os
-import logging
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import geopandas as gpd
-from datetime import datetime
 from matplotlib.lines import Line2D
 from shapely.geometry import Point
 from sklearn.cluster import KMeans
 
 
-def run(data_dir, output_dir, n_clusters, n_init, max_iter, tol, random_state):
+def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, random_state):
     """Execute the full clustering pipeline.
 
     Steps:
-    1. Create timestamped output directory and configure logger.
-    2. Load normalized data from data_dir/normalized_data/.
-    3. Elbow method (k=2..10) → clustering_results/elbow/elbow_plot.png.
-    4. K-Means clustering with the given parameters.
-    5. Save cluster_color_map.csv, clustered_data.csv, clustering_map.png
+    1. Load normalized data from data_dir/normalized_data/.
+    2. Elbow method (k=2..10) → clustering_results/elbow/elbow_plot.png.
+    3. K-Means clustering with the given parameters.
+    4. Save cluster_color_map.csv, clustered_data.csv, clustering_map.png
        → clustering_results/cluster_maps/.
-    6. Geophysical signatures mosaic → clustering_results/geophysical_signatures/.
-    7. Export shapefile → clustering_results/shapefiles/clusters.shp.
+    5. Geophysical signatures mosaic → clustering_results/geophysical_signatures/.
+    6. Export shapefile → clustering_results/shapefiles/clusters.shp.
     """
 
     # ================================================================
-    # 1. SETUP OUTPUT DIRECTORY AND LOGGER
-    # ================================================================
-    folder_name = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-    workflow_dir = os.path.join(output_dir, folder_name)
-    os.makedirs(workflow_dir, exist_ok=True)
-
-    log_file = os.path.join(workflow_dir, "workflow.log")
-    logger = logging.getLogger(f"clustering_workflow_{folder_name}")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter(
-            "%(asctime)s | %(levelname)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-    logger.info("Workflow started")
-    logger.info(f"n_clusters={n_clusters}, n_init={n_init}, max_iter={max_iter}, tol={tol}, random_state={random_state}")
-
-    # ================================================================
-    # 2. LOAD NORMALIZED DATA
+    # 1. LOAD NORMALIZED DATA
     # ================================================================
     file_norm = os.path.join(data_dir, "normalized_data", "co_localized_cubic_res0.002_normalized.csv")
     print(f"Loading normalized data from: {file_norm}")

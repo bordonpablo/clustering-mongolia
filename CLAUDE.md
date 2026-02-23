@@ -2,11 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Workflow Guidelines
-
-- Make atomic changes — one logical change per step.
-- Ask before editing files; confirm intent with the user first.
-
 ## Running the Project
 
 The project is a Python package installable via PEP 621. Install once, then use the `clustering-mongolia` CLI.
@@ -35,7 +30,8 @@ The original Jupyter Notebooks (`src/data-processing.ipynb`, `src/clustering.ipy
 The project is a two-stage geophysical data pipeline implemented as a Python package (`src/clustering_mongolia/`).
 
 ### Package layout
-```
+
+```bash
 src/
 ├── clustering_mongolia/
 │   ├── __init__.py

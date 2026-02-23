@@ -4,7 +4,31 @@ Procesamiento de datos y clustering como aplicacion Python (PEP 621)
 
 ## Instalación
 
-Para instalar la aplicación pararse en el directorio y ejecutar
+Fijarse que versiones de pyenv hay. Si pyenv no está instalado, seguir los pasos de construir entorno Python más abajo
+
+```bash
+pyenv install --list
+```
+Asociar versión de pyenv al proyecto (ejemplo 3.11.8)
+
+Pararse en el directorio del proyecto y ejecutar
+
+```bash
+pyenv local 3.11.8
+python --version
+```
+
+#### Crear y activar un virtualenv
+
+Esto instala todas las librerías del proeycto en un virtual environment
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip setuptools wheel
+```
+
+Finalmente, instalar el proyecto
 
 ```bash
 pip install -e .
@@ -16,7 +40,7 @@ Para probar que funciona, ejecutar
 clustering-mongolia --help
 ```
 
-### Python
+### Construir entorno Python
 
 Si Python no está instalado, seguir los siguientes pasos para instalarlo con **pyenv**
 
@@ -31,7 +55,7 @@ sudo apt install -y \
   libffi-dev liblzma-dev git
 ```
 
-#### Instalar pyenv
+#### Instalar pyenv y virtualenv
 
 ```bash
 curl https://pyenv.run | bash
@@ -47,14 +71,18 @@ eval "$(pyenv init --path)"
 eval "$(pyenv init -)"
 ```
 
-Incluir pyenv en la consola
+Load pyenv automatically by appending the following to ~/.bash_profile if it exists, otherwise ~/.profile (for login shells) and ~/.bashrc (for interactive shells) :
+
+Abrir archivo
 
 ```bash
-# Load pyenv automatically by appending
-# the following to
-# ~/.bash_profile if it exists, otherwise ~/.profile (for login shells)
-# and ~/.bashrc (for interactive shells) :
+nano ~/.bashrc 
+```
 
+Incluir las siguientes lineas al final
+
+
+```bash
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
 eval "$(pyenv init - bash)"
@@ -75,22 +103,7 @@ Reiniciar consola
 pyenv install 3.11.8
 ```
 
-Pararse en la carpeta del proyecto y ejecutar
 
-```bash
-pyenv local 3.11.8
-python --version
-```
-
-#### Crear y activar un virtualenv
-
-Esto instala todas las librerías del proeycto en un virtual environment
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -U pip setuptools wheel
-```
 
 
 ```bash

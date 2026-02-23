@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "clustering-mongolia"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "scipy",
+    "matplotlib",
+    "seaborn",
+    "geopandas",
+    "shapely",
+    "click",
+]
+
+[project.scripts]
+clustering-mongolia = "clustering_mongolia.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

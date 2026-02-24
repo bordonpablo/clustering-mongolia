@@ -9,7 +9,7 @@ from shapely.geometry import Point
 from sklearn.cluster import KMeans
 
 
-def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, random_state):
+def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, random_state, features=None):
     """Execute the full clustering pipeline.
 
     Steps:
@@ -35,7 +35,9 @@ def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, rando
 
     assert len(df_orig) == len(df_norm), "DataFrames have different lengths."
 
-    features = ["DEM", "Mag_Final", "Pot_final", "Tho_Final", "Ura_Final"]
+    if features is None:
+        features = ["DEM", "Mag_Final", "Pot_final", "Tho_Final", "Ura_Final"]
+    print(f"Features for clustering: {features}")
     X = df_norm[features].values
 
     # ================================================================

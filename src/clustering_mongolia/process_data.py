@@ -7,6 +7,75 @@ from scipy.interpolate import griddata
 from sklearn.preprocessing import MinMaxScaler
 
 
+def _reduction_to_pole(grid_2d, dx, dy, inclination_deg, declination_deg):
+    """Apply RTP filter in the wavenumber domain.
+
+    grid_2d: 2D array (rows=lat, cols=lon), may contain NaN.
+    dx/dy: grid spacing in longitude/latitude (degrees).
+    Assumes magnetization direction == inducing field direction.
+    """
+    I = np.radians(inclination_deg)
+    D = np.radians(declination_deg)
+
+    nan_mask = np.isnan(grid_2d)
+    grid_filled = grid_2d.copy()
+    grid_filled[nan_mask] = np.nanmean(grid_2d)
+
+    ny, nx = grid_filled.shape
+    kx = np.fft.fftfreq(nx, d=dx)
+    ky = np.fft.fftfreq(ny, d=dy)
+    KX, KY = np.meshgrid(kx, ky)
+    K = np.sqrt(KX**2 + KY**2)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        kx_norm = np.where(K > 0, KX / K, 0.0)
+        ky_norm = np.where(K > 0, KY / K, 0.0)
+
+    # Direction factor L = sin(I) + i·cos(I)·(kx_norm·sin(D) + ky_norm·cos(D))
+    L = np.sin(I) + 1j * np.cos(I) * (kx_norm * np.sin(D) + ky_norm * np.cos(D))
+    L[0, 0] = 1.0  # avoid division by zero at DC component
+
+    rtp_filter = 1.0 / (L ** 2)
+    rtp_filter[0, 0] = 0.0  # zero out DC (mean field) component
+
+    rtp = np.real(np.fft.ifft2(np.fft.fft2(grid_filled) * rtp_filter))
+    rtp[nan_mask] = np.nan
+    return rtp
+
+
+def _magnetic_derivatives(grid_2d, dx, dy):
+    """Compute Analytical Signal (AS) and Tilt Derivative (TDR) via FFT.
+
+    grid_2d: 2D array (rows=lat, cols=lon), may contain NaN.
+    dx/dy: grid spacing in longitude/latitude (degrees).
+    Returns: (AS, TDR) with same shape as grid_2d.
+    TDR is in radians, range [-π/2, π/2].
+    """
+    nan_mask = np.isnan(grid_2d)
+    grid_filled = grid_2d.copy()
+    grid_filled[nan_mask] = np.nanmean(grid_2d)
+
+    ny, nx = grid_filled.shape
+    KX, KY = np.meshgrid(
+        np.fft.fftfreq(nx, d=dx) * 2 * np.pi,
+        np.fft.fftfreq(ny, d=dy) * 2 * np.pi,
+    )
+    K = np.sqrt(KX**2 + KY**2)
+
+    mag_fft = np.fft.fft2(grid_filled)
+    dx_field = np.real(np.fft.ifft2(mag_fft * 1j * KX))
+    dy_field = np.real(np.fft.ifft2(mag_fft * 1j * KY))
+    dz_field = np.real(np.fft.ifft2(mag_fft * K))
+
+    thd = np.sqrt(dx_field**2 + dy_field**2)
+    AS = np.sqrt(dx_field**2 + dy_field**2 + dz_field**2)
+    TDR = np.arctan2(dz_field, thd)
+
+    AS[nan_mask] = np.nan
+    TDR[nan_mask] = np.nan
+    return AS, TDR
+
+
 def run(data_dir, output_dir, resolution_factor, grid_resolution, interp_method, logger):
     """Execute the full data processing pipeline.
 
@@ -78,11 +147,20 @@ def run(data_dir, output_dir, resolution_factor, grid_resolution, interp_method,
     grid_tho = interpolate_to_grid(df_tho, "Tho_Final", method=interp_method)
     grid_ura = interpolate_to_grid(df_ura, "Ura_Final", method=interp_method)
 
+    # Derived magnetic variables — provisional, para evaluar correlación
+    grid_rtp = _reduction_to_pole(grid_mag, grid_resolution, grid_resolution, 62.0, 1.5)
+    logger.info("RTP computed (I=62°, D=1.5°)")
+    grid_as, grid_tdr = _magnetic_derivatives(grid_mag, grid_resolution, grid_resolution)
+    logger.info("AS and TDR computed")
+
     df_combined = pd.DataFrame({
         "Lon": grid_x.flatten(),
         "Lat": grid_y.flatten(),
         "DEM": grid_dem.flatten(),
         "Mag_Final": grid_mag.flatten(),
+        "RTP": grid_rtp.flatten(),
+        "AS": grid_as.flatten(),
+        "TDR": grid_tdr.flatten(),
         "Pot_final": grid_pot.flatten(),
         "Tho_Final": grid_tho.flatten(),
         "Ura_Final": grid_ura.flatten(),
@@ -96,7 +174,7 @@ def run(data_dir, output_dir, resolution_factor, grid_resolution, interp_method,
     reg_folder = os.path.join(output_dir, "regularization", f"interpolation_{interp_method}")
     os.makedirs(reg_folder, exist_ok=True)
 
-    variables = ["DEM", "Mag_Final", "Pot_final", "Tho_Final", "Ura_Final"]
+    variables = ["DEM", "Mag_Final", "RTP", "AS", "TDR", "Pot_final", "Tho_Final", "Ura_Final"]
     for var in variables:
         if df_combined[var].nunique() > 1:
             plt.figure(figsize=(10, 6))

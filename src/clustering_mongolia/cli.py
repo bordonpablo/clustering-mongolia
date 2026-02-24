@@ -61,7 +61,8 @@ def process_data_cmd(data_dir, output_dir, resolution_factor, grid_resolution, i
 @click.option("--max-iter", default=500, show_default=True, type=int, help="Maximum K-Means iterations.")
 @click.option("--tol", default=0.001, show_default=True, type=float, help="K-Means convergence tolerance.")
 @click.option("--random-state", default=42, show_default=True, type=int, help="Random seed for reproducibility.")
-def create_cluster_cmd(data_dir, output_dir, n_clusters, n_init, max_iter, tol, random_state):
+@click.option("--features", multiple=True, default=("DEM", "Mag_Final", "Pot_final", "Tho_Final", "Ura_Final"), show_default=True, help="Variables to use for clustering. Repeat to add more: --features DEM --features RTP.")
+def create_cluster_cmd(data_dir, output_dir, n_clusters, n_init, max_iter, tol, random_state, features):
     """Run K-Means clustering and export results."""
     folder_name = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     workflow_dir = os.path.join(output_dir, folder_name)
@@ -69,6 +70,7 @@ def create_cluster_cmd(data_dir, output_dir, n_clusters, n_init, max_iter, tol, 
     logger = _setup_logger(f"clustering_workflow_{folder_name}", os.path.join(workflow_dir, "workflow.log"))
     logger.info("Workflow started")
     logger.info(f"n_clusters={n_clusters}, n_init={n_init}, max_iter={max_iter}, tol={tol}, random_state={random_state}")
+    logger.info(f"features={list(features)}")
     create_cluster.run(
         data_dir=data_dir,
         workflow_dir=workflow_dir,
@@ -78,6 +80,7 @@ def create_cluster_cmd(data_dir, output_dir, n_clusters, n_init, max_iter, tol, 
         max_iter=max_iter,
         tol=tol,
         random_state=random_state,
+        features=list(features),
     )
 
 

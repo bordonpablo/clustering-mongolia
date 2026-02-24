@@ -4,6 +4,6 @@
 set -e  # detener si cualquier comando falla
 
 
-clustering-mongolia process-data
+clustering-mongolia process-data 
 
 clustering-mongolia create-cluster

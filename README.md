@@ -32,6 +32,7 @@ Fijarse que versiones de pyenv hay. Si pyenv no está instalado, seguir los paso
 ```bash
 pyenv install --list
 ```
+
 Asociar versión de pyenv al proyecto (ejemplo 3.11.8)
 
 Pararse en el directorio del proyecto y ejecutar
@@ -41,7 +42,7 @@ pyenv local 3.11.8
 python --version
 ```
 
-#### Crear y activar un virtualenv
+### Crear y activar un virtualenv
 
 Esto instala todas las librerías del proeycto en un virtual environment
 
@@ -86,7 +87,6 @@ curl https://pyenv.run | bash
 
 Agregar pyenv al path
 
-
 ```bash
 
 export PATH="$HOME/.pyenv/bin:$PATH"
@@ -104,7 +104,6 @@ nano ~/.bashrc
 
 Incluir las siguientes lineas al final
 
-
 ```bash
 export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
@@ -120,14 +119,11 @@ eval "$(pyenv virtualenv-init -)"
 
 Reiniciar consola
 
-#### Instalar Python 
+#### Instalar Python
 
 ```bash
 pyenv install 3.11.8
 ```
-
-
-
 
 ```bash
 

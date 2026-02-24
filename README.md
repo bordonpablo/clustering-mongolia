@@ -2,6 +2,29 @@
 
 Procesamiento de datos y clustering como aplicacion Python (PEP 621)
 
+## Uso
+
+Procesar datos
+
+```bash
+clustering-mongolia process-data
+```
+
+Clusterizar
+
+```bash
+clustering-mongolia create-cluster \
+  --features DEM \
+  --features Mag_Final \
+  --features RTP \
+  --features AS \
+  --features TDR \
+  --features Pot_final \
+  --features Tho_Final \
+  --features Ura_Final
+
+```
+
 ## Instalación
 
 Fijarse que versiones de pyenv hay. Si pyenv no está instalado, seguir los pasos de construir entorno Python más abajo

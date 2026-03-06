@@ -8,19 +8,28 @@ from matplotlib.lines import Line2D
 from shapely.geometry import Point
 from sklearn.cluster import KMeans
 
+try:
+    import skfuzzy as fuzz
+    _HAS_SKFUZZY = True
+except ImportError:
+    _HAS_SKFUZZY = False
 
-def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, random_state, features=None):
+
+def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, random_state, features=None, algorithm="kmeans", algo_params=None):
     """Execute the full clustering pipeline.
 
     Steps:
     1. Load normalized data from data_dir/normalized_data/.
     2. Elbow method (k=2..10) → clustering_results/elbow/elbow_plot.png.
-    3. K-Means clustering with the given parameters.
+    3. K-Means or FCM clustering with the given parameters.
     4. Save cluster_color_map.csv, clustered_data.csv, clustering_map.png
        → clustering_results/cluster_maps/.
     5. Geophysical signatures mosaic → clustering_results/geophysical_signatures/.
     6. Export shapefile → clustering_results/shapefiles/clusters.shp.
     """
+
+    if algo_params is None:
+        algo_params = {}
 
     # ================================================================
     # 1. LOAD NORMALIZED DATA
@@ -48,45 +57,81 @@ def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, rando
     os.makedirs(elbow_folder, exist_ok=True)
 
     k_values = range(2, 11)
-    wcss = []
-    for k in k_values:
-        km = KMeans(
-            n_clusters=k,
+    elbow_plot = os.path.join(elbow_folder, "elbow_plot.png")
+
+    if algorithm == "fcm":
+        if not _HAS_SKFUZZY:
+            raise ImportError("scikit-fuzzy is required for FCM. Install with: pip install scikit-fuzzy")
+        m       = algo_params.get("m",       2.0)
+        error   = algo_params.get("error",   1e-5)
+        maxiter = algo_params.get("maxiter", 150)
+
+        fpc_values = []
+        for k in k_values:
+            _, u, _, _, _, _, fpc = fuzz.cluster.cmeans(
+                X.T, k, m, error=error, maxiter=maxiter, seed=random_state
+            )
+            fpc_values.append(fpc)
+
+        plt.figure(figsize=(8, 5))
+        plt.plot(list(k_values), fpc_values, marker="o")
+        plt.title("FPC vs Number of Clusters (FCM)")
+        plt.xlabel("Number of Clusters (k)")
+        plt.ylabel("Fuzzy Partition Coefficient (FPC)")
+        plt.grid(True)
+        plt.savefig(elbow_plot, dpi=300)
+        plt.close()
+    else:
+        wcss = []
+        for k in k_values:
+            km = KMeans(
+                n_clusters=k,
+                init="k-means++",
+                n_init=n_init,
+                max_iter=max_iter,
+                tol=tol,
+                random_state=random_state,
+            )
+            km.fit(X)
+            wcss.append(km.inertia_)
+
+        plt.figure(figsize=(8, 5))
+        plt.plot(list(k_values), wcss, marker="o")
+        plt.title("Elbow Method for K-Means")
+        plt.xlabel("Number of Clusters (k)")
+        plt.ylabel("WCSS (Inertia)")
+        plt.grid(True)
+        plt.savefig(elbow_plot, dpi=300)
+        plt.close()
+
+    logger.info(f"Elbow plot saved: {elbow_plot}")
+    print(f"  Elbow plot saved: {elbow_plot}")
+
+    # ================================================================
+    # 4. CLUSTERING
+    # ================================================================
+    print(f"Running {algorithm.upper()} (n_clusters={n_clusters})...")
+
+    if algorithm == "fcm":
+        _, u, _, _, _, _, fpc = fuzz.cluster.cmeans(
+            X.T, n_clusters, m, error=error, maxiter=maxiter, seed=random_state
+        )
+        labels = np.argmax(u, axis=0)
+        logger.info(f"FCM FPC (final): {fpc:.4f}")
+        print(f"  FCM FPC: {fpc:.4f}")
+    else:
+        kmeans = KMeans(
+            n_clusters=n_clusters,
             init="k-means++",
             n_init=n_init,
             max_iter=max_iter,
             tol=tol,
             random_state=random_state,
         )
-        km.fit(X)
-        wcss.append(km.inertia_)
+        labels = kmeans.fit_predict(X)
 
-    plt.figure(figsize=(8, 5))
-    plt.plot(list(k_values), wcss, marker="o")
-    plt.title("Elbow Method for K-Means")
-    plt.xlabel("Number of Clusters (k)")
-    plt.ylabel("WCSS (Inertia)")
-    plt.grid(True)
-    elbow_plot = os.path.join(elbow_folder, "elbow_plot.png")
-    plt.savefig(elbow_plot, dpi=300)
-    plt.close()
-    logger.info(f"Elbow plot saved: {elbow_plot}")
-    print(f"  Elbow plot saved: {elbow_plot}")
-
-    # ================================================================
-    # 4. K-MEANS CLUSTERING
-    # ================================================================
-    print(f"Running K-Means (n_clusters={n_clusters})...")
-    kmeans = KMeans(
-        n_clusters=n_clusters,
-        init="k-means++",
-        n_init=n_init,
-        max_iter=max_iter,
-        tol=tol,
-        random_state=random_state,
-    )
-    df_norm["Cluster"] = kmeans.fit_predict(df_norm[features])
-    df_orig["Cluster"] = df_norm["Cluster"].values
+    df_norm["Cluster"] = labels
+    df_orig["Cluster"] = labels
 
     # ================================================================
     # 5. CLUSTER MAP + SAVE DATA
@@ -95,8 +140,17 @@ def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, rando
     os.makedirs(cluster_maps_folder, exist_ok=True)
 
     cluster_sorted = sorted(df_orig["Cluster"].unique())
-    cluster_palette = sns.color_palette("tab10", len(cluster_sorted))
-    cluster_color_map = {cl: cluster_palette[i] for i, cl in enumerate(cluster_sorted)}
+    _fixed_colors = [
+        (0.122, 0.467, 0.706),  # 0 → blue
+        (1.000, 0.855, 0.000),  # 1 → yellow
+        (0.173, 0.627, 0.173),  # 2 → green
+        (0.839, 0.153, 0.157),  # 3 → red
+        (0.580, 0.404, 0.741),  # 4 → purple (fallback)
+        (0.549, 0.337, 0.294),  # 5 → brown  (fallback)
+        (0.890, 0.467, 0.761),  # 6 → pink   (fallback)
+        (0.498, 0.498, 0.498),  # 7 → gray   (fallback)
+    ]
+    cluster_color_map = {cl: _fixed_colors[i % len(_fixed_colors)] for i, cl in enumerate(cluster_sorted)}
 
     # Save color map
     color_map_file = os.path.join(cluster_maps_folder, "cluster_color_map.csv")
@@ -107,7 +161,7 @@ def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, rando
     colors_for_scatter = df_orig["Cluster"].map(cluster_color_map)
     plt.figure(figsize=(10, 6))
     plt.scatter(df_orig["Lon"], df_orig["Lat"], c=colors_for_scatter, s=5)
-    plt.title(f"K-Means Clustering (n={n_clusters}) in Lon-Lat Space")
+    plt.title(f"{algorithm.upper()} Clustering (n={n_clusters}) in Lon-Lat Space")
     plt.xlabel("Longitude")
     plt.ylabel("Latitude")
     plt.grid(True)
@@ -118,7 +172,7 @@ def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, rando
     ]
     plt.legend(handles=legend_elements, title="Cluster", loc="upper right")
     map_file = os.path.join(cluster_maps_folder, "clustering_map.png")
-    plt.savefig(map_file, dpi=300)
+    plt.savefig(map_file, dpi=600)
     plt.close()
     logger.info(f"Cluster map saved: {map_file}")
     print(f"  Cluster map saved: {map_file}")
@@ -170,7 +224,7 @@ def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, rando
 
     plt.tight_layout()
     sig_file = os.path.join(sig_folder, "geophysical_signatures_mosaic.png")
-    plt.savefig(sig_file, dpi=300)
+    plt.savefig(sig_file, dpi=600)
     plt.close()
     logger.info(f"Geophysical signatures mosaic saved: {sig_file}")
     print(f"  Signatures mosaic saved: {sig_file}")

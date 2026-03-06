@@ -114,6 +114,8 @@ def create_cluster_cmd(ctx, data_dir, output_dir, n_clusters, random_state, feat
         tol=tol,
         random_state=random_state,
         features=features,
+        algorithm=algo,
+        algo_params=algo_params,
     )
 
 

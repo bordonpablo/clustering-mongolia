@@ -17,6 +17,7 @@ dependencies = [
     "shapely",
     "click",
     "pyyaml",
+    "scikit-fuzzy",
 ]
 
 [project.scripts]

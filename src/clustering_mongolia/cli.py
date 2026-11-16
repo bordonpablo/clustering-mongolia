@@ -2,7 +2,7 @@ import os
 import logging
 import click
 from datetime import datetime
-from clustering_mongolia import process_data, create_cluster, segment_geology
+from clustering_mongolia import process_data, create_cluster, segment_geology, investigation_area, qgis_project
 from clustering_mongolia.config_loader import load_config
 
 
@@ -69,6 +69,7 @@ def process_data_cmd(ctx, data_dir, output_dir, resolution_factor, grid_resoluti
         grid_resolution=grid_resolution,
         interp_method=interp_method,
         logger=logger,
+        geophysics_rasters=cfg.get("geophysics_rasters"),
     )
 
 
@@ -181,6 +182,7 @@ def classify_geology_cmd(ctx, map_path, output_dir, palette_path, delta_e_max, f
     ink_l_max       = cfg.get("ink_l_max")
     ink_chroma_max  = cfg.get("ink_chroma_max")
     background_min_px = cfg.get("background_min_px")
+    investigation_area_path = cfg.get("investigation_area_path")
 
     os.makedirs(output_dir, exist_ok=True)
     logger = _setup_logger("classify_geology", os.path.join(output_dir, "classify_geology.log"))
@@ -196,6 +198,70 @@ def classify_geology_cmd(ctx, map_path, output_dir, palette_path, delta_e_max, f
         background_min_px=background_min_px,
         fill_max_px=fill_max_px,
         majority_window=majority_window,
+        investigation_area_path=investigation_area_path,
+        logger=logger,
+    )
+
+
+@main.command()
+@click.pass_context
+@click.option("--planned-path", default=None, type=click.Path(), help="Shapefile del área de investigación planificada.")
+@click.option("--data-dir", default=None, type=click.Path(), help="Carpeta con los CSV crudos.")
+@click.option("--geophysics-dir", default=None, type=click.Path(), help="Rasters geofísicos (salida de process-data).")
+@click.option("--geology-dir", default=None, type=click.Path(), help="Productos de la geología (salida de classify-geology).")
+@click.option("--output-dir", default=None, type=click.Path(), help="Carpeta de salida (área real y PNG).")
+def investigation_area_cmd(ctx, planned_path, data_dir, geophysics_dir, geology_dir, output_dir):
+    """Map the planned vs. real investigation area (area shapefile + PNG maps)."""
+    cfg = load_config(ctx.obj["config"], "investigation_area")
+
+    planned_path   = planned_path   if planned_path   is not None else cfg.get("planned_path")
+    data_dir       = data_dir       if data_dir       is not None else cfg.get("data_dir")
+    geophysics_dir = geophysics_dir if geophysics_dir is not None else cfg.get("geophysics_dir")
+    geology_dir    = geology_dir    if geology_dir    is not None else cfg.get("geology_dir")
+    output_dir     = output_dir     if output_dir     is not None else cfg.get("output_dir")
+
+    os.makedirs(output_dir, exist_ok=True)
+    logger = _setup_logger("investigation_area", os.path.join(output_dir, "investigation_area.log"))
+    logger.info("Workflow started")
+    logger.info(f"planned_path={planned_path}, data_dir={data_dir}, geophysics_dir={geophysics_dir}, geology_dir={geology_dir}")
+    investigation_area.run(
+        planned_path=planned_path,
+        data_dir=data_dir,
+        magnetic_file=cfg.get("magnetic_file"),
+        geophysics_dir=geophysics_dir,
+        geology_dir=geology_dir,
+        output_dir=output_dir,
+        logger=logger,
+    )
+
+
+@main.command()
+@click.pass_context
+@click.option("--planned-path", default=None, type=click.Path(), help="Shapefile del área de investigación planificada.")
+@click.option("--investigation-area-dir", default=None, type=click.Path(), help="Salida de investigation-area.")
+@click.option("--geophysics-dir", default=None, type=click.Path(), help="Rasters geofísicos (salida de process-data).")
+@click.option("--geology-dir", default=None, type=click.Path(), help="Productos de la geología (salida de classify-geology).")
+@click.option("--output-dir", default=None, type=click.Path(), help="Carpeta donde se guarda el proyecto QGIS.")
+def create_qgis_project_cmd(ctx, planned_path, investigation_area_dir, geophysics_dir, geology_dir, output_dir):
+    """Assemble a QGIS project from the outputs of the other stages."""
+    cfg = load_config(ctx.obj["config"], "qgis_project")
+
+    planned_path           = planned_path           if planned_path           is not None else cfg.get("planned_path")
+    investigation_area_dir = investigation_area_dir if investigation_area_dir is not None else cfg.get("investigation_area_dir")
+    geophysics_dir         = geophysics_dir         if geophysics_dir         is not None else cfg.get("geophysics_dir")
+    geology_dir            = geology_dir            if geology_dir            is not None else cfg.get("geology_dir")
+    output_dir             = output_dir             if output_dir             is not None else cfg.get("output_dir")
+
+    os.makedirs(output_dir, exist_ok=True)
+    logger = _setup_logger("qgis_project", os.path.join(output_dir, "qgis_project.log"))
+    logger.info("Workflow started")
+    logger.info(f"planned_path={planned_path}, investigation_area_dir={investigation_area_dir}, geophysics_dir={geophysics_dir}, geology_dir={geology_dir}")
+    qgis_project.run(
+        planned_path=planned_path,
+        investigation_area_dir=investigation_area_dir,
+        geophysics_dir=geophysics_dir,
+        geology_dir=geology_dir,
+        output_dir=output_dir,
         logger=logger,
     )
 
@@ -205,3 +271,5 @@ main.add_command(process_data_cmd, name="process-data")
 main.add_command(create_cluster_cmd, name="create-cluster")
 main.add_command(extract_palette_cmd, name="extract-palette")
 main.add_command(classify_geology_cmd, name="classify-geology")
+main.add_command(investigation_area_cmd, name="investigation-area")
+main.add_command(create_qgis_project_cmd, name="create-qgis-project")

@@ -4,6 +4,13 @@ process_data:
   resolution_factor: 10
   grid_resolution: 0.002
   interp_method: cubic
+  geophysics_rasters:    # GeoTIFF en UTM 48N para QGIS (salen en <output_dir>/geophysics)
+    resolution: 50       # m
+    files:               # nombre de la capa: CSV crudo (Lon, Lat, valor)
+      magnetico: output_lat_long_mag_final.csv
+      potasio: output_Pot.csv
+      torio: output_Thorium.csv
+      uranio: output_Ura.csv
 
 create_cluster:
   data_dir: data/processed
@@ -31,6 +38,7 @@ segment_geology:
   map_path: data/raw/geological_map.tif
   output_dir: data/processed/geology
   palette_path: config/geology_palette.yml   # paleta curada a mano (se versiona)
+  investigation_area_path: "data/raw/investigacion area/Investigation area.shp"   # el recuadro violeta del mapa = esta área
   delta_e_merge: 3.0     # colores a menos de este delta E (CIELAB) se fusionan
   min_pixels: 1000       # un color candidato necesita al menos esta cantidad de píxeles
   max_colors: 40         # máximo de colores candidatos en la paleta
@@ -40,3 +48,18 @@ segment_geology:
   background_min_px: 50000   # blanco en manchas menores a esto (barra de escala, tramas) se rellena; mayores = fondo
   fill_max_px: 60      # los desconocidos se rellenan con la clase vecina hasta esta distancia (px)
   majority_window: 5     # ventana (px) del filtro de mayoría
+
+investigation_area:
+  planned_path: "data/raw/investigacion area/Investigation area.shp"   # área planificada (shapefile, UTM 48N)
+  data_dir: data/raw
+  magnetic_file: output_lat_long_mag_final.csv   # su huella define el área real prospectada
+  geophysics_dir: data/processed/geophysics      # de process-data (fondo magnético del PNG)
+  geology_dir: data/processed/geology            # de classify-geology (fondo geológico del PNG)
+  output_dir: data/processed/investigation_area
+
+qgis_project:
+  planned_path: "data/raw/investigacion area/Investigation area.shp"
+  investigation_area_dir: data/processed/investigation_area   # de investigation-area
+  geophysics_dir: data/processed/geophysics                   # de process-data
+  geology_dir: data/processed/geology                         # de classify-geology
+  output_dir: data/processed/qgis

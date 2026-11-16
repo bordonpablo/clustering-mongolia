@@ -5,6 +5,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.interpolate import griddata
 from sklearn.preprocessing import MinMaxScaler
+import rasterio
+from rasterio.transform import from_origin
+
+from clustering_mongolia.geo_utils import CRS_UTM, NODATA, load_points
 
 
 def _reduction_to_pole(grid_2d, dx, dy, inclination_deg, declination_deg):
@@ -76,7 +80,36 @@ def _magnetic_derivatives(grid_2d, dx, dy):
     return AS, TDR
 
 
-def run(data_dir, output_dir, resolution_factor, grid_resolution, interp_method, logger):
+def _save_point_raster(path, x, y, valores, resolution):
+    """Interpola una variable medida en puntos a una grilla regular en UTM 48N y
+    la guarda como GeoTIFF. Fuera de la huella de los puntos queda sin dato."""
+    xmin, xmax, ymin, ymax = x.min(), x.max(), y.min(), y.max()
+    xs = np.arange(xmin, xmax, resolution) + resolution / 2
+    ys = np.arange(ymax, ymin, -resolution) - resolution / 2
+    gx, gy = np.meshgrid(xs, ys)
+    grilla = griddata((x, y), valores, (gx, gy), method="linear")
+    grilla = np.where(np.isnan(grilla), NODATA, grilla).astype("float32")
+    with rasterio.open(
+        path, "w", driver="GTiff", height=grilla.shape[0], width=grilla.shape[1],
+        count=1, dtype="float32", crs=CRS_UTM,
+        transform=from_origin(xmin, ymax, resolution, resolution),
+        nodata=NODATA, compress="lzw",
+    ) as dst:
+        dst.write(grilla, 1)
+
+
+def _export_geophysics_rasters(data_dir, output_dir, files, resolution, logger):
+    """Exporta cada variable geofísica cruda (magnética, K, Th, U) como GeoTIFF
+    en UTM 48N, para verla en QGIS. files es {nombre: CSV dentro de data_dir}."""
+    os.makedirs(output_dir, exist_ok=True)
+    for nombre, archivo in files.items():
+        x, y, valores = load_points(os.path.join(data_dir, archivo))
+        path = os.path.join(output_dir, f"{nombre}_map.tif")
+        _save_point_raster(path, x, y, valores, resolution)
+        logger.info(f"Raster geofísico guardado: {path}")
+
+
+def run(data_dir, output_dir, resolution_factor, grid_resolution, interp_method, logger, geophysics_rasters=None):
     """Execute the full data processing pipeline.
 
     Steps:
@@ -87,6 +120,8 @@ def run(data_dir, output_dir, resolution_factor, grid_resolution, interp_method,
     5. Apply Min-Max normalization and save CSV to output_dir/normalized_data/.
     6. Save normalized PNG plots to output_dir/normalized_data/plots/.
     7. Compute and save the correlation matrix to output_dir/normalized_data/.
+    8. Export magnetic and radiometric rasters (GeoTIFF, UTM 48N) to output_dir/geophysics/
+       if geophysics_rasters is given ({'resolution': m, 'files': {name: csv}}).
     """
 
     # ================================================================
@@ -243,5 +278,14 @@ def run(data_dir, output_dir, resolution_factor, grid_resolution, interp_method,
     plt.savefig(corr_path, dpi=300)
     plt.close()
     logger.info(f"Correlation matrix saved: {corr_path}")
+
+    # ================================================================
+    # 8. GEOPHYSICS RASTERS (for QGIS)
+    # ================================================================
+    if geophysics_rasters:
+        _export_geophysics_rasters(
+            data_dir, os.path.join(output_dir, "geophysics"),
+            geophysics_rasters["files"], geophysics_rasters["resolution"], logger,
+        )
 
     logger.info("process-data finished successfully.")

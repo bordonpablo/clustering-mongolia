@@ -25,6 +25,26 @@ create_cluster:      # parameters for `clustering-mongolia create-cluster`
       maxiter: 150
 ```
 
+
+```yaml
+process_data:
+  geophysics_rasters:  # GeoTIFF para QGIS: resolución (m) y CSV de cada capa
+    resolution: 50
+    files: {magnetico: output_lat_long_mag_final.csv, ...}
+
+segment_geology:     # `extract-palette` y `classify-geology`
+  investigation_area_path: ...   # shapefile al que se ajusta el recuadro violeta del mapa
+
+investigation_area:  # `investigation-area`: carpetas de las etapas que lee
+  geophysics_dir: ...
+  geology_dir: ...
+
+qgis_project:        # `create-qgis-project`: carpetas de las etapas que reúne
+  investigation_area_dir: ...
+  geophysics_dir: ...
+  geology_dir: ...
+```
+
 ## Usage
 
 ### Use a custom config file

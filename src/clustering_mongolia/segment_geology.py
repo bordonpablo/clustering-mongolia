@@ -2,11 +2,53 @@ import os
 import numpy as np
 import pandas as pd
 import rasterio
+import geopandas as gpd
 import yaml
+from rasterio.features import shapes
+from shapely.geometry import shape
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scipy import ndimage
 from skimage.color import rgb2lab
+
+from rasterio.transform import Affine
+
+from clustering_mongolia.geo_utils import load_planned_area
+
+COLOR_RECUADRO = (77, 0, 116)   # color RGB del recuadro violeta del mapa geológico
+
+
+def _georreferenciar_mapa(rgb, limites):
+    """Calcula el transform del mapa geológico haciendo coincidir su recuadro
+    violeta con el área de investigación planificada.
+
+    El recuadro se detecta como las filas/columnas con muchos píxeles de
+    COLOR_RECUADRO; se toma el centro de cada línea. limites es
+    (izquierda, abajo, derecha, arriba) en UTM 48N. La georreferenciación
+    embebida en el TIF no se usa porque no coincide con los datos.
+    """
+    mascara = np.abs(rgb.astype(int) - np.array(COLOR_RECUADRO)).sum(axis=2) < 30
+    cols = np.where(mascara.sum(axis=0) > 0.3 * rgb.shape[0])[0]
+    filas = np.where(mascara.sum(axis=1) > 0.3 * rgb.shape[1])[0]
+    if len(cols) == 0 or len(filas) == 0:
+        raise ValueError("No se encontró el recuadro violeta en el mapa geológico")
+    # Los píxeles se agrupan en dos líneas (borde izquierdo/derecho o superior/inferior)
+    x0, x1 = cols[cols < rgb.shape[1] / 2].mean() + 0.5, cols[cols >= rgb.shape[1] / 2].mean() + 0.5
+    y0, y1 = filas[filas < rgb.shape[0] / 2].mean() + 0.5, filas[filas >= rgb.shape[0] / 2].mean() + 0.5
+    izq, abajo, der, arriba = limites
+    a = (der - izq) / (x1 - x0)
+    e = -(arriba - abajo) / (y1 - y0)
+    return Affine(a, 0.0, izq - x0 * a, 0.0, e, arriba - y0 * e)
+
+
+def _guardar_mapa_georef(path, rgb, crs, transform):
+    """Guarda el mapa geológico original (RGB) con la georreferenciación corregida."""
+    with rasterio.open(
+        path, "w", driver="GTiff", height=rgb.shape[0], width=rgb.shape[1],
+        count=3, dtype="uint8", crs=crs, transform=transform,
+        photometric="RGB", compress="lzw",
+    ) as dst:
+        dst.write(np.moveaxis(rgb, -1, 0))
 
 
 def _leer_mapa(map_path):
@@ -374,6 +416,40 @@ def _guardar_areas(csv_path, raster_unidades, raster_grupos, clases, grupos, are
     pd.DataFrame(filas, columns=columnas).to_csv(csv_path, index=False)
 
 
+def _guardar_vectores(gpkg_path, raster_unidades, raster_grupos, crs, transform,
+                      paleta_rgb, paleta_ids, clases, grupos):
+    """Convierte los rasters a polígonos y los guarda en un GeoPackage para QGIS.
+
+    Capas: `unidades` (subgrupos) y `grupos`, cada una con sus campos id, nombre,
+    grupo y color (hex). Los colores salen de la paleta (unidades) y de tab10
+    (grupos), los mismos del PNG de control. En QGIS se simbolizan por categoría,
+    así cada clase se prende y apaga por separado.
+    """
+    color_unidad = {}
+    for rgb_c, cid in zip(paleta_rgb[::-1], paleta_ids[::-1]):  # el primero de cada id gana
+        color_unidad[int(cid)] = "#%02x%02x%02x" % tuple(int(v) for v in rgb_c)
+    color_grupo = {
+        gid: "#%02x%02x%02x" % tuple((np.array(plt.cm.tab10((gid - 1) % 10)[:3]) * 255).astype(int))
+        for gid in grupos if gid != 0
+    }
+
+    def poligonos(raster, fila):
+        filas = []
+        for geom, valor in shapes(raster, mask=raster > 0, transform=transform):
+            filas.append({**fila(int(valor)), "geometry": shape(geom)})
+        return gpd.GeoDataFrame(filas, geometry="geometry", crs=crs)
+
+    unidades = poligonos(raster_unidades, lambda i: {
+        "id": i, "nombre": clases[i][0], "grupo": grupos[clases[i][1]], "color": color_unidad[i]})
+    grupos_gdf = poligonos(raster_grupos, lambda g: {
+        "id": g, "nombre": grupos[g], "color": color_grupo[g]})
+    if os.path.exists(gpkg_path):
+        os.remove(gpkg_path)
+    unidades.to_file(gpkg_path, layer="unidades", driver="GPKG")
+    grupos_gdf.to_file(gpkg_path, layer="grupos", driver="GPKG")
+    return len(unidades), len(grupos_gdf)
+
+
 def _guardar_control_visual(png_path, rgb, raster_unidades, raster_grupos,
                             paleta_rgb, paleta_ids, clases, grupos):
     """Guarda un PNG con 3 paneles: mapa original | unidades | grupos.
@@ -409,7 +485,8 @@ def _guardar_control_visual(png_path, rgb, raster_unidades, raster_grupos,
 
 
 def classify_geology(map_path, output_dir, palette_path, delta_e_max, ink_l_max,
-                     ink_chroma_max, background_min_px, fill_max_px, majority_window, logger):
+                     ink_chroma_max, background_min_px, fill_max_px, majority_window,
+                     investigation_area_path, logger):
     """Clasifica el mapa geológico y guarda los resultados georreferenciados.
 
     Pasos:
@@ -420,7 +497,8 @@ def classify_geology(map_path, output_dir, palette_path, delta_e_max, ink_l_max,
        Rellenar los desconocidos con la clase vecina (hasta fill_max_px).
     4. Filtro de mayoría (majority_window) para limpiar el salpicado.
     5. Derivar el raster de grupos a partir del de unidades.
-    6. Guardar rasters, máscaras, CSV de áreas y PNG de control en output_dir.
+    6. Guardar en output_dir: mapa original georreferenciado, rasters, máscaras,
+       polígonos (geology.gpkg), CSV de áreas y PNG de control.
     """
     logger.info(f"Leyendo paleta: {palette_path}")
     paleta_rgb, paleta_ids, clases, grupos = _cargar_paleta(palette_path)
@@ -429,7 +507,10 @@ def classify_geology(map_path, output_dir, palette_path, delta_e_max, ink_l_max,
     logger.info(f"Leyendo mapa: {map_path}")
     rgb = _leer_mapa(map_path)
     with rasterio.open(map_path) as src:
-        crs, transform = src.crs, src.transform
+        crs = src.crs
+    planned_bounds = tuple(load_planned_area(investigation_area_path).total_bounds)
+    transform = _georreferenciar_mapa(rgb, planned_bounds)
+    logger.info(f"Georreferenciación recalculada (recuadro violeta = {investigation_area_path}): {transform}")
     area_pixel_km2 = abs(transform.a * transform.e) / 1e6
 
     colores, _, inverso = _contar_colores(rgb)
@@ -443,6 +524,8 @@ def classify_geology(map_path, output_dir, palette_path, delta_e_max, ink_l_max,
     logger.info("Clasificación terminada (relleno + filtro de mayoría)")
 
     os.makedirs(output_dir, exist_ok=True)
+    _guardar_mapa_georef(os.path.join(output_dir, "geological_map_georef.tif"), rgb, crs, transform)
+    logger.info("Mapa original georreferenciado guardado: geological_map_georef.tif")
     _guardar_raster(os.path.join(output_dir, "geology_units.tif"), raster_unidades, crs, transform, nodata=0)
     _guardar_raster(os.path.join(output_dir, "geology_groups.tif"), raster_grupos, crs, transform, nodata=0)
     logger.info("Rasters guardados: geology_units.tif, geology_groups.tif")
@@ -454,6 +537,11 @@ def classify_geology(map_path, output_dir, palette_path, delta_e_max, ink_l_max,
 
     _guardar_areas(os.path.join(output_dir, "class_areas.csv"), raster_unidades, raster_grupos, clases, grupos, area_pixel_km2)
     logger.info("Áreas guardadas: class_areas.csv")
+
+    gpkg_path = os.path.join(output_dir, "geology.gpkg")
+    n_u, n_g = _guardar_vectores(gpkg_path, raster_unidades, raster_grupos, crs, transform,
+                                 paleta_rgb, paleta_ids, clases, grupos)
+    logger.info(f"Vectores guardados: {gpkg_path} ({n_u} polígonos de unidades, {n_g} de grupos)")
 
     png_path = os.path.join(output_dir, "control_visual.png")
     _guardar_control_visual(png_path, rgb, raster_unidades, raster_grupos, paleta_rgb, paleta_ids, clases, grupos)

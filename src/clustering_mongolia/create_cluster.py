@@ -5,14 +5,80 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import geopandas as gpd
 from matplotlib.lines import Line2D
-from shapely.geometry import Point
+from shapely.geometry import Point, box
 from sklearn.cluster import KMeans
+
+from clustering_mongolia.qgis_styles import categorized_renderer_xml, write_qml
 
 try:
     import skfuzzy as fuzz
     _HAS_SKFUZZY = True
 except ImportError:
     _HAS_SKFUZZY = False
+
+
+def _hex(rgb):
+    """(r, g, b) en 0-1 -> '#rrggbb'."""
+    return "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in rgb)
+
+
+def _write_cluster_style(shp_path, clusters, cluster_color_map, attr):
+    """Escribe el .qml (junto al shapefile) que simboliza por cluster con sus colores."""
+    estilo = pd.DataFrame({
+        "id": clusters,
+        attr: clusters,
+        "color": [_hex(cluster_color_map[cl]) for cl in clusters],
+    })
+    write_qml(os.path.splitext(shp_path)[0] + ".qml", categorized_renderer_xml(estilo, attr))
+
+
+def _export_cluster_layers(df_orig, shp_folder, cluster_color_map, logger):
+    """Exporta los clusters como capas GIS (lon/lat WGS 84), todas con estilo .qml
+    con los mismos colores del mapa PNG, para prender y apagar cada cluster en QGIS:
+
+    - clusters.shp: la nube de puntos, con el campo Cluster.
+    - clusters_polygons.shp: un polígono por cluster (las celdas de la grilla de
+      cada cluster unidas), con los campos id, nombre y color.
+    - by_cluster/cluster_<k>.shp: un shapefile por cluster, de un solo color.
+    """
+    clusters = sorted(df_orig["Cluster"].unique())
+
+    # Puntos
+    geometry = [Point(xy) for xy in zip(df_orig["Lon"], df_orig["Lat"])]
+    gdf = gpd.GeoDataFrame(df_orig, geometry=geometry, crs="EPSG:4326")
+    shp_path = os.path.join(shp_folder, "clusters.shp")
+    gdf.to_file(shp_path)
+    _write_cluster_style(shp_path, clusters, cluster_color_map, "Cluster")
+    logger.info(f"Shapefile saved: {shp_path}")
+
+    # Polígonos: cada punto es el centro de una celda de la grilla regular
+    paso_lon = np.diff(np.unique(df_orig["Lon"].round(6))).min()
+    paso_lat = np.diff(np.unique(df_orig["Lat"].round(6))).min()
+    # Los bordes se calculan desde el índice de la grilla (no desde cada punto) para
+    # que las celdas vecinas compartan bordes exactos y se unan sin costuras.
+    lon0, lat0 = df_orig["Lon"].min(), df_orig["Lat"].min()
+    ix = np.round((df_orig["Lon"].values - lon0) / paso_lon).astype(int)
+    iy = np.round((df_orig["Lat"].values - lat0) / paso_lat).astype(int)
+    celdas = [box(lon0 + (i - 0.5) * paso_lon, lat0 + (j - 0.5) * paso_lat,
+                  lon0 + (i + 0.5) * paso_lon, lat0 + (j + 0.5) * paso_lat)
+              for i, j in zip(ix, iy)]
+    celdas = gpd.GeoDataFrame({"id": df_orig["Cluster"].values}, geometry=celdas, crs="EPSG:4326")
+    poligonos = celdas.dissolve(by="id", as_index=False)
+    poligonos["nombre"] = [f"Cluster {cl}" for cl in poligonos["id"]]
+    poligonos["color"] = [_hex(cluster_color_map[cl]) for cl in poligonos["id"]]
+    poly_path = os.path.join(shp_folder, "clusters_polygons.shp")
+    poligonos.to_file(poly_path)
+    write_qml(os.path.splitext(poly_path)[0] + ".qml", categorized_renderer_xml(poligonos, "nombre"))
+    logger.info(f"Shapefile saved: {poly_path}")
+
+    # Un shapefile por cluster
+    por_cluster = os.path.join(shp_folder, "by_cluster")
+    os.makedirs(por_cluster, exist_ok=True)
+    for _, fila in poligonos.iterrows():
+        cl_path = os.path.join(por_cluster, f"cluster_{fila['id']}.shp")
+        gpd.GeoDataFrame([fila], geometry="geometry", crs="EPSG:4326").to_file(cl_path)
+        write_qml(os.path.splitext(cl_path)[0] + ".qml", categorized_renderer_xml(pd.DataFrame([fila]), "nombre"))
+    logger.info(f"Per-cluster shapefiles saved in: {por_cluster}")
 
 
 def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, random_state, features=None, algorithm="kmeans", algo_params=None):
@@ -25,7 +91,8 @@ def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, rando
     4. Save cluster_color_map.csv, clustered_data.csv, clustering_map.png
        → clustering_results/cluster_maps/.
     5. Geophysical signatures mosaic → clustering_results/geophysical_signatures/.
-    6. Export shapefile → clustering_results/shapefiles/clusters.shp.
+    6. Export GIS layers → clustering_results/shapefiles/ (clusters.shp, clusters_polygons.shp,
+       by_cluster/cluster_<k>.shp), each with a .qml style using the cluster colors.
     """
 
     if algo_params is None:
@@ -232,16 +299,11 @@ def run(data_dir, workflow_dir, logger, n_clusters, n_init, max_iter, tol, rando
     # ================================================================
     # 7. EXPORT SHAPEFILE
     # ================================================================
-    print("Exporting shapefile...")
+    print("Exporting shapefiles...")
     shp_folder = os.path.join(workflow_dir, "clustering_results", "shapefiles")
     os.makedirs(shp_folder, exist_ok=True)
-
-    geometry = [Point(xy) for xy in zip(df_orig["Lon"], df_orig["Lat"])]
-    gdf = gpd.GeoDataFrame(df_orig, geometry=geometry, crs="EPSG:4326")
-    shp_path = os.path.join(shp_folder, "clusters.shp")
-    gdf.to_file(shp_path)
-    logger.info(f"Shapefile saved: {shp_path}")
-    print(f"  Shapefile saved: {shp_path}")
+    _export_cluster_layers(df_orig, shp_folder, cluster_color_map, logger)
+    print(f"  Shapefiles saved in: {shp_folder}")
 
     logger.info("Workflow finished successfully.")
     print(f"\ncreate-cluster finished successfully. Results in: {workflow_dir}")

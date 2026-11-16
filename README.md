@@ -42,55 +42,103 @@ Rama de geología (independiente del clustering)
                                                         └─► capas: geología por clase
 
 Control del área de investigación (usa lo de arriba)
-  investigation-area ──► capas: área real, área planificada + 3 mapas PNG
+  investigation-area ──► capas: área real, área planificada + mapas PNG de control
 ```
+
+## Comandos: qué hace y qué genera cada uno
+
+Todas las salidas van a `data/processed/` (salvo `create-cluster`, que va a `output/`). Las carpetas `data/` y `output/` no se versionan en git. Los parámetros están en `config/default.yml` y se pueden cambiar por opción de línea de comandos (ver `clustering-mongolia <comando> --help`).
 
 ### Pipeline principal
 
-```bash
-clustering-mongolia process-data      # regulariza, normaliza y deriva variables magnéticas
-clustering-mongolia create-cluster    # clustering y mapas de resultados
-```
+#### `process-data`
 
-### Rama de geología
+Carga los CSV crudos de `data/raw/` (DEM, magnético, potasio, torio, uranio), los regulariza en una grilla, deriva variables magnéticas (RTP, AS, TDR) y normaliza.
 
-```bash
-clustering-mongolia extract-palette   # solo la primera vez: paleta candidata de colores (se edita a mano)
-clustering-mongolia classify-geology  # clasifica el mapa en unidades y grupos
-```
+Genera:
 
-El mapa geológico se georreferencia con el área de investigación planificada (shapefile en `data/raw/investigacion area/`): el recuadro violeta del mapa se hace coincidir con ese polígono. La georreferenciación que trae el TIF no coincide con los datos, por eso no se usa.
+| Qué | Dónde |
+|---|---|
+| CSV con todas las variables normalizadas (entrada del clustering) | `data/processed/normalized_data/` |
+| Gráficos de cada variable normalizada y matriz de correlación | `data/processed/normalized_data/plots/` y `correlation_matrix.png` |
+| CSV y gráficos de cada variable interpolada en la grilla | `data/processed/regularization/` |
+| DEM con resolución reducida | `data/processed/created_from_DEM/` |
+| **Capas GIS:** rasters GeoTIFF `magnetico`, `potasio`, `torio`, `uranio` (UTM 48N, 50 m) | `data/processed/geophysics/` |
+| Log | `data/processed/process.log` |
+
+#### `create-cluster`
+
+Necesita: `process-data`. Calcula el número de clusters con el método del codo, corre el algoritmo elegido (K-Means por defecto) sobre las variables indicadas en `features` y grafica los resultados. Cada corrida crea su propia carpeta con fecha y hora.
+
+Genera en `output/AAAA_MM_DD_HH_MM_SS/`:
+
+| Qué | Dónde |
+|---|---|
+| Gráfico del codo | `clustering_results/elbow/` |
+| Mapas geográficos de los clusters | `clustering_results/cluster_maps/` |
+| Firmas geofísicas de cada cluster | `clustering_results/geophysical_signatures/` |
+| **Capas GIS** de los clusters (lon/lat WGS 84), con estilo `.qml` y los mismos colores del mapa PNG: `clusters_polygons.shp` (un polígono por cluster), `by_cluster/cluster_<k>.shp` (un shapefile por cluster, de un solo color) y `clusters.shp` (la nube de puntos, con el campo `Cluster`) | `clustering_results/shapefiles/` |
+| Log | `workflow.log` |
+
+### Rama de geología (independiente del clustering)
+
+#### `extract-palette` (solo la primera vez)
+
+Lee `data/raw/geological_map.tif`, cuenta los colores y propone una paleta candidata. No sobrescribe una paleta existente salvo con `--force`.
+
+Genera:
+
+| Qué | Dónde |
+|---|---|
+| Paleta candidata, que se **edita a mano** para nombrar unidades y agruparlas | `config/geology_palette.yml` |
+| Imagen con una muestra de cada color y dónde aparece en el mapa | `data/processed/geology/palette_swatches.png` |
+
+#### `classify-geology`
+
+Necesita: la paleta editada (`config/geology_palette.yml`) y el shapefile del área planificada (`data/raw/investigacion area/`). Clasifica cada píxel del mapa en una subclase (unidad) y un grupo.
+
+Además **georreferencia** el mapa: la que trae el TIF no coincide con los datos, así que se recalcula haciendo coincidir el recuadro violeta del mapa con el polígono del área planificada.
+
+Genera en `data/processed/geology/`:
+
+| Qué | Dónde |
+|---|---|
+| **Capas GIS:** polígonos de subclases y de grupos, con estilo por clase (`.qml`) para prender y apagar cada clase en QGIS | `vectors/unidades.shp`, `vectors/grupos.shp` |
+| **Capa GIS:** mapa geológico original ya georreferenciado | `geological_map_georef.tif` |
+| Rasters de la clasificación (una banda con el id de cada clase) | `geology_units.tif`, `geology_groups.tif` |
+| Una máscara 0/1 por subclase y por grupo | `masks_units/`, `masks_groups/` |
+| Área y porcentaje de cada clase | `class_areas.csv` |
+| Imagen de control: mapa original, unidades y grupos lado a lado | `control_visual.png` |
+| Log | `classify_geology.log` |
 
 ### Control del área de investigación
 
-```bash
-clustering-mongolia investigation-area
-```
+#### `investigation-area`
 
-Compara el área planificada con la realmente prospectada (la huella de los datos magnéticos, que termina más abajo) y genera 3 mapas PNG. Necesita haber corrido antes `process-data` y `classify-geology`.
+Necesita: `process-data` y `classify-geology`. Compara el área planificada (shapefile) con la realmente prospectada, que es la huella de los datos magnéticos y termina más abajo que la planificada.
+
+Genera en `data/processed/investigation_area/`:
+
+| Qué | Dónde |
+|---|---|
+| **Capa GIS:** área real prospectada | `investigation_area_real.shp` |
+| Mapa de las dos áreas, planificada vs. real | `map_areas.png` |
+| El área real y la planificada sobre cada mapa geofísico | `map_real_area_magnetico.png`, `map_real_area_potasio.png`, `map_real_area_torio.png`, `map_real_area_uranio.png` |
+| Las dos áreas sobre el mapa geológico | `map_areas_geological.png` |
+| Log | `investigation_area.log` |
 
 ## Capas para QGIS
 
-Cada comando deja las suyas. Las de `process-data`, `classify-geology` e `investigation-area` están en UTM 48N (EPSG:32648); los shapefiles de `create-cluster` están en lon/lat WGS 84 (EPSG:4326), y QGIS los reproyecta al superponerlos:
+Resumen de las capas GIS que dejan los comandos (detalle arriba). Las de `process-data`, `classify-geology` e `investigation-area` están en UTM 48N (EPSG:32648); los shapefiles de `create-cluster` están en lon/lat WGS 84 (EPSG:4326), y QGIS los reproyecta al superponerlos.
 
-| Comando | Capas | Carpeta |
-|---|---|---|
-| `process-data` | `magnetico`, `potasio`, `torio`, `uranio` (GeoTIFF) | `data/processed/geophysics/` |
-| `classify-geology` | `geology.gpkg` (capas `unidades` y `grupos`, una categoría por clase), `geological_map_georef.tif` (mapa original georreferenciado), rasters y máscaras por clase | `data/processed/geology/` |
-| `investigation-area` | `investigation_area_real.shp` y los PNG de control | `data/processed/investigation_area/` |
-| `create-cluster` | shapefiles de los clusters | `output/AAAA_MM_DD_HH_MM_SS/shapefiles/` |
+| Comando | Capas |
+|---|---|
+| `process-data` | `data/processed/geophysics/*_map.tif` |
+| `classify-geology` | `data/processed/geology/vectors/unidades.shp`, `grupos.shp` y `geological_map_georef.tif` |
+| `investigation-area` | `data/processed/investigation_area/investigation_area_real.shp` |
+| `create-cluster` | `output/AAAA_MM_DD_HH_MM_SS/clustering_results/shapefiles/` (`clusters_polygons.shp`, `by_cluster/cluster_<k>.shp`, `clusters.shp`) |
 
-En QGIS se agregan arrastrando los archivos al lienzo. En `geology.gpkg`, cada clase se prende o apaga desde el panel de capas.
-
-### Proyecto QGIS (opcional)
-
-Si no se quiere sumar las capas una por una, hay un comando que las reúne en un proyecto ya armado:
-
-```bash
-clustering-mongolia create-qgis-project   # genera data/processed/qgis/mongolia.qgs
-```
-
-No calcula nada: solo junta lo que dejaron `process-data`, `classify-geology` e `investigation-area`. Conviene cerrar QGIS antes de volver a correr los comandos, porque con el proyecto abierto bloquea los archivos.
+En QGIS se agregan arrastrando los archivos al lienzo. Los shapefiles de geología y de clusters traen un `.qml` con el mismo nombre: QGIS lo aplica solo, con una categoría de color por clase (o por cluster), y cada una se prende o apaga desde el panel de capas. Para eso, el `.shp` y el `.qml` deben quedar juntos en la misma carpeta.
 
 ## Instalación
 

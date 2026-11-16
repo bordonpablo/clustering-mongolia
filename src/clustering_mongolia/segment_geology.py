@@ -14,6 +14,7 @@ from skimage.color import rgb2lab
 from rasterio.transform import Affine
 
 from clustering_mongolia.geo_utils import load_planned_area
+from clustering_mongolia.qgis_styles import categorized_renderer_xml, write_qml
 
 COLOR_RECUADRO = (77, 0, 116)   # color RGB del recuadro violeta del mapa geológico
 
@@ -416,14 +417,15 @@ def _guardar_areas(csv_path, raster_unidades, raster_grupos, clases, grupos, are
     pd.DataFrame(filas, columns=columnas).to_csv(csv_path, index=False)
 
 
-def _guardar_vectores(gpkg_path, raster_unidades, raster_grupos, crs, transform,
+def _guardar_vectores(vectors_dir, raster_unidades, raster_grupos, crs, transform,
                       paleta_rgb, paleta_ids, clases, grupos):
-    """Convierte los rasters a polígonos y los guarda en un GeoPackage para QGIS.
+    """Convierte los rasters a polígonos y los guarda como shapefiles para QGIS.
 
-    Capas: `unidades` (subgrupos) y `grupos`, cada una con sus campos id, nombre,
-    grupo y color (hex). Los colores salen de la paleta (unidades) y de tab10
-    (grupos), los mismos del PNG de control. En QGIS se simbolizan por categoría,
-    así cada clase se prende y apaga por separado.
+    Archivos en vectors_dir: `unidades.shp` (subgrupos) y `grupos.shp`, cada uno
+    con sus campos id, nombre, grupo y color (hex), más un `.qml` con el mismo
+    nombre: QGIS lo aplica solo al abrir la capa y la simboliza por categoría,
+    así cada clase se prende y apaga por separado. Los colores salen de la
+    paleta (unidades) y de tab10 (grupos), los mismos del PNG de control.
     """
     color_unidad = {}
     for rgb_c, cid in zip(paleta_rgb[::-1], paleta_ids[::-1]):  # el primero de cada id gana
@@ -443,10 +445,11 @@ def _guardar_vectores(gpkg_path, raster_unidades, raster_grupos, crs, transform,
         "id": i, "nombre": clases[i][0], "grupo": grupos[clases[i][1]], "color": color_unidad[i]})
     grupos_gdf = poligonos(raster_grupos, lambda g: {
         "id": g, "nombre": grupos[g], "color": color_grupo[g]})
-    if os.path.exists(gpkg_path):
-        os.remove(gpkg_path)
-    unidades.to_file(gpkg_path, layer="unidades", driver="GPKG")
-    grupos_gdf.to_file(gpkg_path, layer="grupos", driver="GPKG")
+    os.makedirs(vectors_dir, exist_ok=True)
+    for nombre, gdf in (("unidades", unidades), ("grupos", grupos_gdf)):
+        shp_path = os.path.join(vectors_dir, f"{nombre}.shp")
+        gdf.to_file(shp_path, encoding="utf-8")
+        write_qml(os.path.join(vectors_dir, f"{nombre}.qml"), categorized_renderer_xml(gdf, "nombre"))
     return len(unidades), len(grupos_gdf)
 
 
@@ -498,7 +501,7 @@ def classify_geology(map_path, output_dir, palette_path, delta_e_max, ink_l_max,
     4. Filtro de mayoría (majority_window) para limpiar el salpicado.
     5. Derivar el raster de grupos a partir del de unidades.
     6. Guardar en output_dir: mapa original georreferenciado, rasters, máscaras,
-       polígonos (geology.gpkg), CSV de áreas y PNG de control.
+       polígonos (vectors/unidades.shp y grupos.shp, con estilo .qml), CSV de áreas y PNG de control.
     """
     logger.info(f"Leyendo paleta: {palette_path}")
     paleta_rgb, paleta_ids, clases, grupos = _cargar_paleta(palette_path)
@@ -538,10 +541,10 @@ def classify_geology(map_path, output_dir, palette_path, delta_e_max, ink_l_max,
     _guardar_areas(os.path.join(output_dir, "class_areas.csv"), raster_unidades, raster_grupos, clases, grupos, area_pixel_km2)
     logger.info("Áreas guardadas: class_areas.csv")
 
-    gpkg_path = os.path.join(output_dir, "geology.gpkg")
-    n_u, n_g = _guardar_vectores(gpkg_path, raster_unidades, raster_grupos, crs, transform,
+    vectors_dir = os.path.join(output_dir, "vectors")
+    n_u, n_g = _guardar_vectores(vectors_dir, raster_unidades, raster_grupos, crs, transform,
                                  paleta_rgb, paleta_ids, clases, grupos)
-    logger.info(f"Vectores guardados: {gpkg_path} ({n_u} polígonos de unidades, {n_g} de grupos)")
+    logger.info(f"Shapefiles guardados en {vectors_dir} ({n_u} polígonos de unidades, {n_g} de grupos)")
 
     png_path = os.path.join(output_dir, "control_visual.png")
     _guardar_control_visual(png_path, rgb, raster_unidades, raster_grupos, paleta_rgb, paleta_ids, clases, grupos)

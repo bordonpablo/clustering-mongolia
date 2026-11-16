@@ -54,7 +54,7 @@ The project is a two-stage geophysical data pipeline implemented as a Python pac
 │   ├── create_cluster.py           ← Stage 2 logic
 │   ├── segment_geology.py          ← extract-palette / classify-geology (geology products)
 │   ├── investigation_area.py       ← planned vs. real area (shapefile + PNG)
-│   └── qgis_project.py             ← assembles the QGIS project (no computation)
+│   └── qgis_styles.py              ← QGIS .qml styles (one color category per class/cluster)
 ├── scripts/
 │   ├── segment_geology.py          ← exploratory, standalone (not part of the CLI)
 │   ├── test.sh                     ← smoke test: process-data + create-cluster
@@ -65,7 +65,7 @@ The project is a two-stage geophysical data pipeline implemented as a Python pac
 
 ### Configuration (`config/default.yml`)
 
-Parameters are grouped by command (`process_data`, `create_cluster`, `segment_geology`, `investigation_area`, `qgis_project`). `cli.py` loads the section with `load_config` and each CLI option, when given, overrides the YAML value (CLI > config). The global `--config` option (default `config/default.yml`) selects another file.
+Parameters are grouped by command (`process_data`, `create_cluster`, `segment_geology` and `investigation_area`). `cli.py` loads the section with `load_config` and each CLI option, when given, overrides the YAML value (CLI > config). The global `--config` option (default `config/default.yml`) selects another file.
 
 `create_cluster` config includes:
 - `features`: list of variables fed to the clustering.
@@ -84,17 +84,14 @@ It also exports the raw magnetic and K/Th/U data as GeoTIFF rasters (UTM 48N, `g
 Variables available after this stage: `DEM`, `Mag_Final`, `RTP`, `AS`, `TDR`, `Pot_final`, `Tho_Final`, `Ura_Final`.
 
 ### Stage 2 — `create-cluster` (`src/clustering_mongolia/create_cluster.py`)
-Loads normalized data from `data/processed/normalized_data/`, evaluates optimal cluster count via the elbow method (k=2..10), runs the selected algorithm (K-Means by default: `init="k-means++"`) on the selected `features`, generates geographic and geophysical signature plots, exports shapefiles for QGIS, and saves all results under a timestamped directory `output/YYYY_MM_DD_HH_MM_SS/` with a `workflow.log`.
+Loads normalized data from `data/processed/normalized_data/`, evaluates optimal cluster count via the elbow method (k=2..10), runs the selected algorithm (K-Means by default: `init="k-means++"`) on the selected `features`, generates geographic and geophysical signature plots, exports GIS layers for QGIS (`clustering_results/shapefiles/`: `clusters_polygons.shp` with one polygon per cluster, `by_cluster/cluster_<k>.shp` one file per cluster, and `clusters.shp` the point cloud; each with a `.qml` style using the cluster colors), and saves all results under a timestamped directory `output/YYYY_MM_DD_HH_MM_SS/` with a `workflow.log`.
 
 ### Geology branch — `extract-palette` / `classify-geology` (`src/clustering_mongolia/segment_geology.py`)
 Independent of the clustering pipeline (stages 1 and 2 above are the main pipeline).
-Classifies `data/raw/geological_map.tif` into units and groups using the hand-curated `config/geology_palette.yml` (`extract-palette` generates the candidate palette first). The embedded georeferencing of the TIF does not match the data, so it is recomputed: the purple frame drawn on the map is matched to the planned investigation area shapefile (`data/raw/investigacion area/`, UTM 48N). Outputs in `data/processed/geology/`: `geological_map_georef.tif` (original map, corrected), `geology_units.tif` / `geology_groups.tif`, per-class masks, `class_areas.csv`, `geology.gpkg` (layers `unidades` and `grupos`, polygons with a `color` field) and a control PNG.
+Classifies `data/raw/geological_map.tif` into units and groups using the hand-curated `config/geology_palette.yml` (`extract-palette` generates the candidate palette first). The embedded georeferencing of the TIF does not match the data, so it is recomputed: the purple frame drawn on the map is matched to the planned investigation area shapefile (`data/raw/investigacion area/`, UTM 48N). Outputs in `data/processed/geology/`: `geological_map_georef.tif` (original map, corrected), `geology_units.tif` / `geology_groups.tif`, per-class masks, `class_areas.csv`, `vectors/unidades.shp` and `vectors/grupos.shp` (class polygons with `id`, `nombre`, `grupo`, `color` fields, plus a `.qml` style with one color category per class) and a control PNG.
 
 ### Investigation area check — `investigation-area` (`src/clustering_mongolia/investigation_area.py`)
-Computes the really surveyed area (convex hull of the magnetic points, UTM 48N), which ends below the planned area, and compares both. Writes `data/processed/investigation_area/`: `investigation_area_real.shp` and three PNG maps (planned vs. real, real over magnetic, areas over geology). It only reads the products of `process-data` and `classify-geology` for the backgrounds.
-
-### Optional QGIS project — `create-qgis-project` (`src/clustering_mongolia/qgis_project.py`)
-Every stage already leaves its own GIS layers (geophysics rasters, geology GeoPackage/rasters, area shapefile, cluster shapefiles) that can be added to QGIS one by one; this command is a convenience. It computes nothing: assembles `data/processed/qgis/mongolia.qgs` from the outputs of `process-data`, `classify-geology` and `investigation-area` (areas, geology by class, geophysics rasters, georeferenced geological map), with relative paths. Run it last: it needs `process-data`, `classify-geology` and `investigation-area` first. QGIS locks the files while a project is open, so close it before re-running.
+Computes the really surveyed area (convex hull of the magnetic points, UTM 48N), which ends below the planned area, and compares both. Writes `data/processed/investigation_area/`: `investigation_area_real.shp` and PNG control maps: `map_areas.png` (planned vs. real), `map_real_area_<name>.png` for each geophysics raster (magnetic, K, Th, U) and `map_areas_geological.png`. It only reads the products of `process-data` and `classify-geology` for the backgrounds.
 
 ### Exploratory script — `scripts/segment_geology.py`
 Standalone script (not wired into the CLI) that segments `data/raw/geological_map.tif` by color: converts RGB to HSV, lets the user click pixels to sample colors per lithology, classifies every pixel by nearest sampled color, masks very dark pixels as no-data, and prints the sampled colors in YAML format for `config/default.yml`. Intended to relate the clusters to known geology.
@@ -129,23 +126,19 @@ data/raw/ (5 CSV files)
         ├── clustering_results/
         │   ├── elbow/
         │   ├── cluster_maps/
-        │   └── geophysical_signatures/
-        ├── shapefiles/          ← GIS layers: clusters (QGIS-compatible)
+        │   ├── geophysical_signatures/
+        │   └── shapefiles/      ← GIS layers: clusters_polygons.shp, by_cluster/, clusters.shp (+ .qml styles)
         └── workflow.log
 
 Geology branch (independent)
 data/raw/geological_map.tif + data/raw/investigacion area/
   → clustering-mongolia extract-palette (once) → config/geology_palette.yml (edited by hand)
   → clustering-mongolia classify-geology
-    → data/processed/geology/           ← GIS layers: geology.gpkg, georeferenced map, rasters
+    → data/processed/geology/           ← GIS layers: vectors/*.shp, georeferenced map, rasters
 
 Investigation area check (reads geophysics/ and geology/)
   → clustering-mongolia investigation-area
     → data/processed/investigation_area/  ← GIS layer: real area shapefile + PNG maps
-
-Optional
-  → clustering-mongolia create-qgis-project
-    → data/processed/qgis/mongolia.qgs  ← bundles the layers above into one project
 ```
 
 `data/` and `output/` are excluded from git (see `.gitignore`).

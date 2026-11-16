@@ -56,10 +56,3 @@ investigation_area:
   geophysics_dir: data/processed/geophysics      # de process-data (fondo magnético del PNG)
   geology_dir: data/processed/geology            # de classify-geology (fondo geológico del PNG)
   output_dir: data/processed/investigation_area
-
-qgis_project:
-  planned_path: "data/raw/investigacion area/Investigation area.shp"
-  investigation_area_dir: data/processed/investigation_area   # de investigation-area
-  geophysics_dir: data/processed/geophysics                   # de process-data
-  geology_dir: data/processed/geology                         # de classify-geology
-  output_dir: data/processed/qgis

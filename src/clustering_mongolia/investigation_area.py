@@ -1,4 +1,5 @@
 import os
+import glob
 import numpy as np
 import geopandas as gpd
 import rasterio
@@ -33,14 +34,18 @@ def compute_real_area(mag_csv, logger):
 # Lectura de los productos de otras etapas
 # ====================================================================
 
-def _read_magnetic_raster(path):
-    """Lee el ráster magnético (de process-data). Devuelve (grilla, extent para imshow)."""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"No existe {path}. Correr antes: clustering-mongolia process-data")
-    with rasterio.open(path) as src:
-        grilla = src.read(1)
-        b = src.bounds
-    return grilla, (b.left, b.right, b.bottom, b.top)
+def _read_geophysics_rasters(geophysics_dir):
+    """Lee los rasters geofísicos (de process-data: magnético y radiométricas).
+    Devuelve {nombre: (grilla, extent para imshow)}."""
+    paths = sorted(glob.glob(os.path.join(geophysics_dir, "*_map.tif")))
+    if not paths:
+        raise FileNotFoundError(f"No hay rasters en {geophysics_dir}. Correr antes: clustering-mongolia process-data")
+    rasters = {}
+    for path in paths:
+        with rasterio.open(path) as src:
+            b = src.bounds
+            rasters[os.path.basename(path).replace("_map.tif", "")] = (src.read(1), (b.left, b.right, b.bottom, b.top))
+    return rasters
 
 
 def _read_geological_map(path):
@@ -90,14 +95,15 @@ def _plot_areas(path, planned, real, extent):
     plt.close(fig)
 
 
-def _plot_magnetic(path, mag_grid, mag_extent, planned, real, extent):
+def _plot_geophysics(path, nombre, grilla, grilla_extent, planned, real, extent):
+    """Área real y planificada sobre un ráster geofísico (magnético o radiométrico)."""
     fig, ax = plt.subplots(figsize=(10, 10))
-    datos = np.ma.masked_equal(mag_grid, NODATA)
+    datos = np.ma.masked_equal(grilla, NODATA)
     vmin, vmax = np.percentile(datos.compressed(), [2, 98])
-    im = ax.imshow(datos, extent=mag_extent, cmap="viridis", vmin=vmin, vmax=vmax)
-    fig.colorbar(im, ax=ax, shrink=0.7, label="Mag_Final (nT)")
+    im = ax.imshow(datos, extent=grilla_extent, cmap="viridis", vmin=vmin, vmax=vmax)
+    fig.colorbar(im, ax=ax, shrink=0.7, label=nombre)
     _draw_areas(ax, planned, real)
-    _finish_axes(ax, extent, "Área real prospectada sobre el mapa magnético")
+    _finish_axes(ax, extent, f"Área real prospectada sobre el mapa de {nombre}")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -122,9 +128,11 @@ def run(planned_path, data_dir, magnetic_file, geophysics_dir, geology_dir, outp
     1. Leer el área planificada (shapefile) y calcular el área real
        prospectada (envolvente convexa de los puntos magnéticos).
     2. Guardar el área real como shapefile.
-    3. Generar 3 PNG: áreas, real sobre magnético, áreas sobre geología. Para
-       los fondos lee los productos de otras etapas: magnetico_map.tif
-       (process-data) y geological_map_georef.tif (classify-geology).
+    3. Generar los PNG de control: áreas planificada vs. real (map_areas.png),
+       el área real sobre cada ráster geofísico (map_real_area_<nombre>.png:
+       magnético y radiométricas) y las áreas sobre la geología
+       (map_areas_geological.png). Para los fondos lee los productos de otras
+       etapas: *_map.tif (process-data) y geological_map_georef.tif (classify-geology).
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -137,7 +145,7 @@ def run(planned_path, data_dir, magnetic_file, geophysics_dir, geology_dir, outp
     real.to_file(real_path)
     logger.info(f"Área real guardada: {real_path}")
 
-    mag_grid, mag_extent = _read_magnetic_raster(os.path.join(geophysics_dir, "magnetico_map.tif"))
+    geophysics = _read_geophysics_rasters(geophysics_dir)
     rgb, geo_extent = _read_geological_map(os.path.join(geology_dir, "geological_map_georef.tif"))
 
     # Encuadre común de los PNG: las dos áreas con un margen
@@ -148,9 +156,10 @@ def run(planned_path, data_dir, magnetic_file, geophysics_dir, geology_dir, outp
     margen = 0.03 * max(xmax - xmin, ymax - ymin)
     extent = (xmin - margen, ymin - margen, xmax + margen, ymax + margen)
 
-    _plot_areas(os.path.join(output_dir, "map_1_areas.png"), planned, real, extent)
-    _plot_magnetic(os.path.join(output_dir, "map_2_real_area_magnetic.png"),
-                   mag_grid, mag_extent, planned, real, extent)
-    _plot_geological(os.path.join(output_dir, "map_3_areas_geological.png"),
+    _plot_areas(os.path.join(output_dir, "map_areas.png"), planned, real, extent)
+    for nombre, (grilla, grilla_extent) in geophysics.items():
+        _plot_geophysics(os.path.join(output_dir, f"map_real_area_{nombre}.png"),
+                         nombre, grilla, grilla_extent, planned, real, extent)
+    _plot_geological(os.path.join(output_dir, "map_areas_geological.png"),
                      rgb, geo_extent, planned, real, extent)
-    logger.info("PNG guardados: map_1_areas.png, map_2_real_area_magnetic.png, map_3_areas_geological.png")
+    logger.info(f"PNG guardados: map_areas.png, map_real_area_<{'|'.join(geophysics)}>.png, map_areas_geological.png")

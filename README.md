@@ -249,18 +249,6 @@ pyenv install 3.11.8
 
 Ejemplos de lo que genera el proyecto para una zona de Mongolia (los comandos están más arriba).
 
-### Clustering
-
-K-Means con 6 clusters sobre elevación (DEM), magnético, potasio, torio y uranio.
-
-![Clusters](docs/img/clusters.png)
-
-### Datos magnéticos y radiométricos
-
-Magnético, potasio, torio y uranio sobre la zona realmente prospectada (azul). En rojo, el área de investigación planificada, que llegaba más al norte de lo que finalmente se midió.
-
-![Datos magnéticos y radiométricos](docs/img/geofisica.png)
-
 ### Geología
 
 Mapa geológico original.
@@ -270,3 +258,15 @@ Mapa geológico original.
 El mismo mapa clasificado en 7 grupos (cada grupo reúne una o más de las 9 unidades o subgrupos).
 
 ![Geología clasificada en grupos](docs/img/geologia_grupos.png)
+
+### Datos magnéticos y radiométricos
+
+Magnético, potasio, torio y uranio sobre la zona realmente prospectada (azul). En rojo, el área de investigación planificada, que llegaba más al norte de lo que finalmente se midió.
+
+![Datos magnéticos y radiométricos](docs/img/geofisica.png)
+
+### Clustering
+
+K-Means con 6 clusters sobre elevación (DEM), magnético, potasio, torio y uranio.
+
+![Clusters](docs/img/clusters.png)

@@ -25,43 +25,72 @@ clustering-mongolia create-cluster \
 
 ```
 
-## Flujo completo
+## Cómo está organizado
 
-Cada comando hace una sola cosa y deja sus productos en `data/processed/`. El orden es:
+El proyecto tiene un **pipeline principal** y, aparte, una **rama de geología**. Cada etapa deja sus resultados como **capas GIS** que se pueden abrir en QGIS y sumar a un proyecto.
 
-| # | Comando | Qué hace | Salida |
-|---|---|---|---|
-| 1 | `process-data` | Regulariza y normaliza los datos; exporta la magnética y las radiométricas como rasters para QGIS | `data/processed/normalized_data/`, `data/processed/geophysics/` |
-| 2 | `extract-palette` | Extrae una paleta candidata de colores del mapa geológico (se edita a mano) | `config/geology_palette.yml` |
-| 3 | `classify-geology` | Clasifica el mapa geológico en unidades y grupos, lo georreferencia y lo vectoriza | `data/processed/geology/` |
-| 4 | `investigation-area` | Calcula el área realmente prospectada y la compara con la planificada (PNG) | `data/processed/investigation_area/` |
-| 5 | `create-qgis-project` | Arma el proyecto QGIS reuniendo lo de los pasos 1, 3 y 4 | `data/processed/qgis/mongolia.qgs` |
-| - | `create-cluster` | Clustering de los datos normalizados (independiente de 2 a 5) | `output/AAAA_MM_DD_HH_MM_SS/` |
+```
+Pipeline principal
+  datos crudos (CSV) ──► process-data ──► create-cluster
+                              │                 │
+                              │                 └─► capas: clusters (shapefiles)
+                              └─► capas: magnético y radiométricas (GeoTIFF)
 
-```bash
-clustering-mongolia process-data
-clustering-mongolia classify-geology
-clustering-mongolia investigation-area
-clustering-mongolia create-qgis-project
-clustering-mongolia create-cluster
+Rama de geología (independiente del clustering)
+  mapa geológico ──► extract-palette (una vez) ──► classify-geology
+                                                        │
+                                                        └─► capas: geología por clase
+
+Control del área de investigación (usa lo de arriba)
+  investigation-area ──► capas: área real, área planificada + 3 mapas PNG
 ```
 
-`extract-palette` solo hace falta la primera vez (o si cambia el mapa). El paso 4 necesita haber corrido antes 1 y 3, y el 5 necesita 1, 3 y 4.
+### Pipeline principal
 
-### Proyecto QGIS
+```bash
+clustering-mongolia process-data      # regulariza, normaliza y deriva variables magnéticas
+clustering-mongolia create-cluster    # clustering y mapas de resultados
+```
 
-`create-qgis-project` no calcula nada: solo reúne los productos de las otras etapas en `data/processed/qgis/mongolia.qgs`. Capas:
+### Rama de geología
 
-- `area_real` y `area_planificada`.
-- Grupo **Geologia (clases)**: `unidades` y `grupos`, con una categoría por clase que se prende/apaga desde el panel de capas.
-- Grupo **Geofisica**: `magnetico`, `potasio`, `torio`, `uranio`.
-- `mapa_geologico_original`, con la georreferenciación corregida.
+```bash
+clustering-mongolia extract-palette   # solo la primera vez: paleta candidata de colores (se edita a mano)
+clustering-mongolia classify-geology  # clasifica el mapa en unidades y grupos
+```
 
-Todo está en UTM 48N (EPSG:32648). Cerrar QGIS antes de volver a correr los comandos: con el proyecto abierto bloquea los archivos.
+El mapa geológico se georreferencia con el área de investigación planificada (shapefile en `data/raw/investigacion area/`): el recuadro violeta del mapa se hace coincidir con ese polígono. La georreferenciación que trae el TIF no coincide con los datos, por eso no se usa.
 
-### Georreferenciación del mapa geológico
+### Control del área de investigación
 
-La georreferenciación embebida en `geological_map.tif` no coincide con los datos. `classify-geology` la recalcula haciendo coincidir el recuadro violeta del mapa con el shapefile del área de investigación planificada (`data/raw/investigacion area/`).
+```bash
+clustering-mongolia investigation-area
+```
+
+Compara el área planificada con la realmente prospectada (la huella de los datos magnéticos, que termina más abajo) y genera 3 mapas PNG. Necesita haber corrido antes `process-data` y `classify-geology`.
+
+## Capas para QGIS
+
+Cada comando deja las suyas. Las de `process-data`, `classify-geology` e `investigation-area` están en UTM 48N (EPSG:32648); los shapefiles de `create-cluster` están en lon/lat WGS 84 (EPSG:4326), y QGIS los reproyecta al superponerlos:
+
+| Comando | Capas | Carpeta |
+|---|---|---|
+| `process-data` | `magnetico`, `potasio`, `torio`, `uranio` (GeoTIFF) | `data/processed/geophysics/` |
+| `classify-geology` | `geology.gpkg` (capas `unidades` y `grupos`, una categoría por clase), `geological_map_georef.tif` (mapa original georreferenciado), rasters y máscaras por clase | `data/processed/geology/` |
+| `investigation-area` | `investigation_area_real.shp` y los PNG de control | `data/processed/investigation_area/` |
+| `create-cluster` | shapefiles de los clusters | `output/AAAA_MM_DD_HH_MM_SS/shapefiles/` |
+
+En QGIS se agregan arrastrando los archivos al lienzo. En `geology.gpkg`, cada clase se prende o apaga desde el panel de capas.
+
+### Proyecto QGIS (opcional)
+
+Si no se quiere sumar las capas una por una, hay un comando que las reúne en un proyecto ya armado:
+
+```bash
+clustering-mongolia create-qgis-project   # genera data/processed/qgis/mongolia.qgs
+```
+
+No calcula nada: solo junta lo que dejaron `process-data`, `classify-geology` e `investigation-area`. Conviene cerrar QGIS antes de volver a correr los comandos, porque con el proyecto abierto bloquea los archivos.
 
 ## Instalación
 

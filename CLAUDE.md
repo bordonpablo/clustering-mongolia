@@ -16,53 +16,92 @@ clustering-mongolia process-data
 # Step 2: Clustering and export
 clustering-mongolia create-cluster
 
-# Custom parameters
+# Custom parameters (CLI options always override the config file)
 clustering-mongolia process-data --resolution-factor 5 --grid-resolution 0.001
 clustering-mongolia create-cluster --n-clusters 4
+
+# Choose the variables used for clustering (repeat --features)
+clustering-mongolia create-cluster --features DEM --features Mag_Final --features RTP
+
+# Use a custom config file (global option, goes before the subcommand)
+clustering-mongolia --config config/my_experiment.yml create-cluster
 ```
 
 Run `clustering-mongolia --help` or `clustering-mongolia <subcommand> --help` for all options.
 
-The original Jupyter Notebooks (`src/data-processing.ipynb`, `src/clustering.ipynb`) are kept as reference. The `.vscode/settings.json` configures conda as the Python environment manager.
+`scripts/test.sh` runs `process-data` followed by `create-cluster` as a quick smoke test (`scripts/test-full.sh` is the extended version).
+
+The Python version is pinned in `.python-version` (3.11); a local `.venv/` is used (see README.md for setup with pyenv).
 
 ## Architecture
 
-The project is a two-stage geophysical data pipeline implemented as a Python package (`src/clustering_mongolia/`).
+The project is a two-stage geophysical data pipeline implemented as a Python package (`src/clustering_mongolia/`). It clusters an area of Mongolia into zones with similar geophysical signature (elevation, magnetics, K/Th/U radiometrics) using unsupervised learning.
 
-### Package layout
+### Repository layout
 
 ```bash
-src/
-├── clustering_mongolia/
+├── pyproject.toml                  ← PEP 621 package, defines the `clustering-mongolia` entry point
+├── README.md                       ← usage and environment setup (Spanish)
+├── config/
+│   ├── default.yml                 ← all pipeline parameters, grouped by command
+│   └── README.md                   ← how the config works
+├── src/clustering_mongolia/
 │   ├── __init__.py
-│   ├── cli.py            ← click entry point (clustering-mongolia)
-│   ├── process_data.py   ← Stage 1 logic
-│   └── create_cluster.py ← Stage 2 logic
-├── data-processing.ipynb ← reference notebook
-└── clustering.ipynb      ← reference notebook
+│   ├── cli.py                      ← click entry point, logger setup, config/CLI merge
+│   ├── config_loader.py            ← load_config(path, command_name) reads a YAML section
+│   ├── process_data.py             ← Stage 1 logic
+│   └── create_cluster.py           ← Stage 2 logic
+├── scripts/
+│   ├── segment_geology.py          ← exploratory, standalone (not part of the CLI)
+│   ├── test.sh                     ← smoke test: process-data + create-cluster
+│   └── test-full.sh
+├── data/   (git-ignored)           ← raw/ and processed/ (has its own README.md)
+└── output/ (git-ignored)           ← timestamped results (has its own README.md)
 ```
 
+### Configuration (`config/default.yml`)
+
+Parameters are grouped by command (`process_data`, `create_cluster`). `cli.py` loads the section with `load_config` and each CLI option, when given, overrides the YAML value (CLI > config). The global `--config` option (default `config/default.yml`) selects another file.
+
+`create_cluster` config includes:
+- `features`: list of variables fed to the clustering.
+- `algorithm`: `kmeans` (default) or `fcm` (Fuzzy C-Means; `create_cluster.run` has an `fcm` branch and logs the FPC).
+- `algo_params`: per-algorithm hyperparameters (`kmeans`: `n_init`, `max_iter`, `tol`; `fcm`: `m`, `error`, `maxiter`).
+
 ### Stage 1 — `process-data` (`src/clustering_mongolia/process_data.py`)
-Loads five raw CSV files from `data/raw/` (DEM elevation, magnetic field, K/Th/U radiometrics), reduces DEM resolution by a factor of 10, co-localizes all datasets onto a regular grid (`res=0.002`) using cubic interpolation (`scipy.interpolate.griddata`), applies Min-Max normalization (0–1), and writes outputs to `data/processed/`.
+Loads five raw CSV files from `data/raw/` (DEM elevation, magnetic field, K/Th/U radiometrics), reduces DEM resolution by `resolution_factor`, co-localizes all datasets onto a regular grid (`grid_resolution`) using `scipy.interpolate.griddata`, and derives magnetic variables via FFT on the gridded magnetic field:
+- `RTP`: Reduction to the Pole (`_reduction_to_pole`, inclination 62°, declination 1.5°).
+- `AS`: Analytical Signal and `TDR`: Tilt Derivative in radians (`_magnetic_derivatives`).
+
+It then applies Min-Max normalization (0–1), generates per-variable plots and a correlation matrix, and writes outputs to `data/processed/`. A `process.log` is written to the output dir.
+
+Variables available after this stage: `DEM`, `Mag_Final`, `RTP`, `AS`, `TDR`, `Pot_final`, `Tho_Final`, `Ura_Final`.
 
 ### Stage 2 — `create-cluster` (`src/clustering_mongolia/create_cluster.py`)
-Loads normalized data from `data/processed/normalized_data/`, evaluates optimal cluster count via the elbow method (k=2..10), runs K-Means (`n_clusters=5`, `init="k-means++"`, `n_init=20`, `max_iter=500`, `random_state=42`), generates geographic and geophysical signature plots, exports shapefiles for QGIS, and saves all results under a timestamped directory `output/YYYY_MM_DD_HH_MM_SS/` with a `workflow.log`.
+Loads normalized data from `data/processed/normalized_data/`, evaluates optimal cluster count via the elbow method (k=2..10), runs the selected algorithm (K-Means by default: `init="k-means++"`) on the selected `features`, generates geographic and geophysical signature plots, exports shapefiles for QGIS, and saves all results under a timestamped directory `output/YYYY_MM_DD_HH_MM_SS/` with a `workflow.log`.
 
-### Key Parameters (CLI options)
+### Exploratory script — `scripts/segment_geology.py`
+Standalone script (not wired into the CLI) that segments `data/raw/geological_map.tif` by color: converts RGB to HSV, lets the user click pixels to sample colors per lithology, classifies every pixel by nearest sampled color, masks very dark pixels as no-data, and prints the sampled colors in YAML format for `config/default.yml`. Intended to relate the clusters to known geology.
+
+### Key Parameters (defaults in `config/default.yml`, overridable via CLI)
 | Parameter | Subcommand | Option | Default |
 |---|---|---|---|
+| Input data dir | `process-data` | `--data-dir` | `data/raw` |
+| Output dir | `process-data` | `--output-dir` | `data/processed` |
 | DEM resolution factor | `process-data` | `--resolution-factor` | 10 |
 | Grid resolution | `process-data` | `--grid-resolution` | 0.002 |
 | Interpolation method | `process-data` | `--interp-method` | `cubic` |
+| Input data dir | `create-cluster` | `--data-dir` | `data/processed` |
+| Output base dir | `create-cluster` | `--output-dir` | `output` |
 | `n_clusters` | `create-cluster` | `--n-clusters` | 5 |
-| `n_init` | `create-cluster` | `--n-init` | 20 |
-| `max_iter` | `create-cluster` | `--max-iter` | 500 |
-| `tol` | `create-cluster` | `--tol` | 0.001 |
 | `random_state` | `create-cluster` | `--random-state` | 42 |
+| `features` | `create-cluster` | `--features` (repeatable) | DEM, Mag_Final, Pot_final, Tho_Final, Ura_Final |
+| Algorithm | `create-cluster` | `--algorithm` | `kmeans` |
+| `n_init`, `max_iter`, `tol` | `create-cluster` | config only (`algo_params.kmeans`) | 20, 500, 0.001 |
 
 ### Data Flow
 ```
-data/raw/ (5 CSV files)
+data/raw/ (5 CSV files + geological_map.tif)
   → clustering-mongolia process-data
     → data/processed/created_from_DEM/
     → data/processed/regularization/
@@ -80,6 +119,11 @@ data/raw/ (5 CSV files)
 `data/` and `output/` are excluded from git (see `.gitignore`).
 
 ## Development Guidelines for Claude
+
+### Git Rules
+
+- *Never commit and never push*: Do not run `git commit`, `git push`, or open PRs. The user makes all commits themselves. Leave changes in the working tree.
+- Read-only git commands (`status`, `diff`, `log`) are fine.
 
 ### Working Style
 

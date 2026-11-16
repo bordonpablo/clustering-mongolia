@@ -18,6 +18,8 @@ dependencies = [
     "click",
     "pyyaml",
     "scikit-fuzzy",
+    "rasterio",
+    "scikit-image",
 ]
 
 [project.scripts]

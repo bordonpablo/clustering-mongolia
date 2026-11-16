@@ -8,7 +8,7 @@ process_data:
 create_cluster:
   data_dir: data/processed
   output_dir: output
-  n_clusters: 5
+  n_clusters: 6
   random_state: 42
   features:
     - DEM
@@ -26,3 +26,17 @@ create_cluster:
       m: 2.0
       error: 1.0e-5
       maxiter: 150
+
+segment_geology:
+  map_path: data/raw/geological_map.tif
+  output_dir: data/processed/geology
+  palette_path: config/geology_palette.yml   # paleta curada a mano (se versiona)
+  delta_e_merge: 3.0     # colores a menos de este delta E (CIELAB) se fusionan
+  min_pixels: 1000       # un color candidato necesita al menos esta cantidad de píxeles
+  max_colors: 40         # máximo de colores candidatos en la paleta
+  delta_e_max: 6.0       # un píxel a más de este delta E de la paleta queda desconocido
+  ink_l_max: 35          # "tinta": luminosidad L* menor a este valor...
+  ink_chroma_max: 15     # ...y croma menor a este valor (negro/gris oscuro)
+  background_min_px: 50000   # blanco en manchas menores a esto (barra de escala, tramas) se rellena; mayores = fondo
+  fill_max_px: 60      # los desconocidos se rellenan con la clase vecina hasta esta distancia (px)
+  majority_window: 5     # ventana (px) del filtro de mayoría

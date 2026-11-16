@@ -1,0 +1,41 @@
+# Paleta del mapa geológico de la región de Zhanchivlan (curada a mano).
+# Los nombres salen de la leyenda (data/raw/Urt_gozgor_translated.jpg); a confirmar.
+# Los colores se identificaron leyendo el TIF junto a cada etiqueta del mapa.
+#
+#  - groups: grupos geológicos (nivel superior).
+#  - classes: unidades (subgrupos), cada una con su nombre y el grupo al que pertenece.
+#    El id 0 = ignorar (fondo blanco), no se rellena.
+#  - colors: cada color RGB apunta a un id de classes. Varios colores pueden
+#    compartir el mismo id (sub-tonos de una unidad).
+#  - Todo color que NO figura acá (negro, símbolos, bordes, marco violeta, etc.)
+#    queda como desconocido y se rellena con la unidad vecina.
+groups:
+  1: Intrusivo_J2-3_Sharhad
+  2: Intrusivo_T3-J1_Zhanchivlan
+  3: Intrusivo_C3-P
+  4: Intrusivo_Ordovicico
+  5: Proterozoico-Cambrico
+  6: Devonico_inferior
+  7: Cuaternario
+classes:
+  0: ignorar
+  1: {name: gamma1_J2-3s, group: 1}
+  2: {name: gamma1_T3-J1j, group: 2}
+  3: {name: gamma2_T3-J1j, group: 2}
+  4: {name: gammadelta_C3-P, group: 3}
+  5: {name: gamma-gammadelta_O, group: 4}
+  6: {name: nu1_O, group: 4}
+  7: {name: PR3-E1, group: 5}
+  8: {name: D1bd, group: 6}
+  9: {name: Q, group: 7}
+colors:
+  - {id: 0, rgb: [255, 255, 255]}   # fondo
+  - {id: 1, rgb: [254, 16, 31]}     # rojo fuerte
+  - {id: 2, rgb: [255, 28, 45]}     # rojo suave
+  - {id: 3, rgb: [255, 50, 80]}     # rojo rosado
+  - {id: 4, rgb: [255, 98, 109]}    # salmón
+  - {id: 5, rgb: [255, 150, 167]}   # rosa
+  - {id: 6, rgb: [29, 185, 124]}    # verde
+  - {id: 7, rgb: [232, 191, 159]}   # beige
+  - {id: 8, rgb: [195, 146, 114]}   # marrón
+  - {id: 9, rgb: [254, 255, 179]}   # amarillo pálido

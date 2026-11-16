@@ -2,6 +2,28 @@
 
 Procesamiento de datos y clustering como aplicacion Python (PEP 621)
 
+## Resultados
+
+Ejemplos de lo que genera el proyecto para una zona de Mongolia (los comandos están más abajo).
+
+### Clustering
+
+K-Means con 6 clusters sobre elevación (DEM), magnético, potasio, torio y uranio.
+
+![Clusters](docs/img/clusters.png)
+
+### Datos magnéticos y radiométricos
+
+Magnético, potasio, torio y uranio sobre la zona realmente prospectada (azul). En rojo, el área de investigación planificada, que llegaba más al norte de lo que finalmente se midió.
+
+![Datos magnéticos y radiométricos](docs/img/geofisica.png)
+
+### Geología
+
+Mapa geológico original, clasificado en 9 unidades (subgrupos) y 7 grupos.
+
+![Geología por clases](docs/img/geologia_clases.png)
+
 ## Uso
 
 Procesar datos
